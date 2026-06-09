@@ -2,6 +2,8 @@ import { Link } from "react-router";
 import type { Route } from "./+types/courses";
 import { requireUser } from "~/lib/session.server";
 import * as courseService from "~/services/courseService";
+import * as ratingService from "~/services/ratingService";
+import { CourseRating } from "~/components/course-rating";
 import {
   Card,
   CardContent,
@@ -12,7 +14,16 @@ import {
 
 export async function loader(args: Route.LoaderArgs) {
   await requireUser(args);
-  return { courses: courseService.getPublishedCourses() };
+  const courses = courseService.getPublishedCourses();
+  const stats = ratingService.getRatingStatsForCourses(
+    courses.map((c) => c.id)
+  );
+  return {
+    courses: courses.map((course) => ({
+      ...course,
+      rating: stats.get(course.id) ?? { average: null, count: 0 },
+    })),
+  };
 }
 
 export default function Courses({ loaderData }: Route.ComponentProps) {
@@ -33,6 +44,11 @@ export default function Courses({ loaderData }: Route.ComponentProps) {
                 <CardHeader>
                   <CardTitle>{course.title}</CardTitle>
                   <CardDescription>by {course.instructorName}</CardDescription>
+                  <CourseRating
+                    average={course.rating.average}
+                    count={course.rating.count}
+                    className="mt-1"
+                  />
                 </CardHeader>
                 <CardContent className="line-clamp-3 text-sm text-muted-foreground">
                   {course.description}

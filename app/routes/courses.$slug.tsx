@@ -4,8 +4,10 @@ import { requireUser } from "~/lib/session.server";
 import * as courseService from "~/services/courseService";
 import * as enrollmentService from "~/services/enrollmentService";
 import * as progressService from "~/services/progressService";
+import * as ratingService from "~/services/ratingService";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
+import { CourseRating, CourseRatingInput } from "~/components/course-rating";
 
 export async function loader(args: Route.LoaderArgs) {
   const user = await requireUser(args);
@@ -16,20 +18,47 @@ export async function loader(args: Route.LoaderArgs) {
   const completed = new Set(
     progressService.getCompletedLessonIds(user.id, course.id)
   );
+  const ratingStats = ratingService.getRatingStats(course.id);
+  const userRating = enrolled
+    ? (ratingService.getUserRating(user.id, course.id)?.rating ?? null)
+    : null;
 
-  return { course, enrolled, completedIds: [...completed] };
+  return {
+    course,
+    enrolled,
+    completedIds: [...completed],
+    ratingStats,
+    userRating,
+  };
 }
 
 export async function action(args: Route.ActionArgs) {
   const user = await requireUser(args);
   const course = courseService.getCourseBySlug(args.params.slug);
   if (!course) throw data("Course not found", { status: 404 });
+
+  const formData = await args.request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "rate") {
+    if (!enrollmentService.isEnrolled(user.id, course.id)) {
+      throw data("Enroll before rating this course.", { status: 403 });
+    }
+    const rating = Number(formData.get("rating"));
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw data("Rating must be a whole number from 1 to 5.", { status: 400 });
+    }
+    ratingService.rateCourse(user.id, course.id, rating);
+    return { ok: true };
+  }
+
   enrollmentService.enroll(user.id, course.id);
   return { ok: true };
 }
 
 export default function CourseDetail({ loaderData }: Route.ComponentProps) {
-  const { course, enrolled, completedIds } = loaderData;
+  const { course, enrolled, completedIds, ratingStats, userRating } =
+    loaderData;
   const completed = new Set(completedIds);
   const firstLesson = course.modules.flatMap((m) => m.lessons)[0];
 
@@ -37,6 +66,11 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     <div className="grid gap-8 lg:grid-cols-[2fr_1fr]">
       <div>
         <h1 className="text-2xl font-bold">{course.title}</h1>
+        <CourseRating
+          average={ratingStats.average}
+          count={ratingStats.count}
+          className="mt-2"
+        />
         <p className="mt-2 text-muted-foreground">{course.description}</p>
 
         <div className="mt-8 space-y-6">
@@ -92,9 +126,14 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                 <Button className="w-full">Continue learning</Button>
               </Link>
             )}
+            <CourseRatingInput
+              value={userRating}
+              className="mt-6 border-t border-border pt-4"
+            />
           </>
         ) : (
           <Form method="post">
+            <input type="hidden" name="intent" value="enroll" />
             <p className="mb-4 text-sm text-muted-foreground">
               Enroll to access lessons and the AI tutor.
             </p>
