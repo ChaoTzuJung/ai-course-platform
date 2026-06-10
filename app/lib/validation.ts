@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { QuestionType } from "~/db/schema";
 
+// Max length for a lesson comment body (chars).
+export const COMMENT_MAX_LENGTH = 500;
+
 // ─── Shared Zod schemas ───
 // Used by AI quiz generation (generateObject) and by the quiz-save action.
 

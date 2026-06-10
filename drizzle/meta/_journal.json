@@ -15,6 +15,13 @@
       "when": 1781031724546,
       "tag": "0001_regular_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781062583657,
+      "tag": "0002_chilly_vision",
+      "breakpoints": true
     }
   ]
 }

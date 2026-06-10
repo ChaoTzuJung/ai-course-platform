@@ -8,19 +8,25 @@ import * as enrollmentService from "~/services/enrollmentService";
 import * as progressService from "~/services/progressService";
 import * as quizService from "~/services/quizService";
 import * as chatService from "~/services/chatService";
+import * as commentService from "~/services/commentService";
 import { scoreQuiz } from "~/services/quizScoringService";
 import { renderMarkdown } from "~/lib/markdown.server";
-import { LessonProgressStatus } from "~/db/enums";
+import { LessonProgressStatus, UserRole } from "~/db/enums";
+import { normalizeCommentBody } from "~/services/commentService";
 import { Button, buttonVariants } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import { TutorChat } from "~/components/tutor-chat";
+import { LessonComments } from "~/components/lesson-comments";
 
 export async function loader(args: Route.LoaderArgs) {
   const user = await requireUser(args);
   const course = courseService.getCourseBySlug(args.params.slug);
   if (!course) throw data("Course not found", { status: 404 });
 
-  if (!enrollmentService.isEnrolled(user.id, course.id)) {
+  const enrolled = enrollmentService.isEnrolled(user.id, course.id);
+  const canPost = commentService.canPostComment(user, course, enrolled);
+  // Enrolled students learn here; the instructor/admin may also view to moderate.
+  if (!canPost) {
     throw redirect(`/courses/${course.slug}`);
   }
 
@@ -55,6 +61,14 @@ export async function loader(args: Route.LoaderArgs) {
     parts: [{ type: "text", text: m.content }],
   }));
 
+  const comments = commentService
+    .getCommentsByLesson(lesson.id)
+    .map((c) => ({
+      ...c,
+      authorRole: c.authorRole as UserRole,
+      canDelete: commentService.canDeleteComment(user, c, course),
+    }));
+
   return {
     course,
     lesson,
@@ -62,6 +76,8 @@ export async function loader(args: Route.LoaderArgs) {
     status: progress?.status ?? LessonProgressStatus.NotStarted,
     quiz,
     initialMessages,
+    comments,
+    canPost,
   };
 }
 
@@ -72,6 +88,41 @@ export async function action(args: Route.ActionArgs) {
 
   const form = await args.request.formData();
   const intent = form.get("intent");
+
+  if (intent === "comment-create") {
+    const course = courseService.getCourseBySlug(args.params.slug);
+    if (!course) throw data("Course not found", { status: 404 });
+
+    const enrolled = enrollmentService.isEnrolled(user.id, course.id);
+    if (!commentService.canPostComment(user, course, enrolled)) {
+      throw data("You can't comment on this lesson.", { status: 403 });
+    }
+
+    const body = normalizeCommentBody(String(form.get("body") ?? ""));
+    if (body === null) {
+      throw data("Comment must be 1–500 characters.", { status: 400 });
+    }
+
+    commentService.addComment(user.id, lesson.id, body);
+    return { kind: "comment" as const };
+  }
+
+  if (intent === "comment-delete") {
+    const course = courseService.getCourseBySlug(args.params.slug);
+    if (!course) throw data("Course not found", { status: 404 });
+
+    const commentId = Number(form.get("commentId"));
+    const comment = commentService.getCommentById(commentId);
+    if (!comment || comment.lessonId !== lesson.id) {
+      throw data("Comment not found", { status: 404 });
+    }
+    if (!commentService.canDeleteComment(user, comment, course)) {
+      throw data("You can't delete this comment.", { status: 403 });
+    }
+
+    commentService.softDeleteComment(commentId);
+    return { kind: "comment" as const };
+  }
 
   if (intent === "progress") {
     const status = form.get("status") as LessonProgressStatus;
@@ -111,8 +162,16 @@ export default function LessonView({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { course, lesson, contentHtml, status, quiz, initialMessages } =
-    loaderData;
+  const {
+    course,
+    lesson,
+    contentHtml,
+    status,
+    quiz,
+    initialMessages,
+    comments,
+    canPost,
+  } = loaderData;
   const completed = status === LessonProgressStatus.Completed;
   const quizResult =
     actionData && actionData.kind === "quiz" ? actionData : null;
@@ -223,6 +282,8 @@ export default function LessonView({
             </Form>
           </section>
         )}
+
+        <LessonComments comments={comments} canPost={canPost} />
       </div>
 
       <div className="lg:sticky lg:top-8 lg:h-[calc(100vh-8rem)]">

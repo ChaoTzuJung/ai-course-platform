@@ -146,6 +146,22 @@ export const courseRatings = sqliteTable(
   ]
 );
 
+export const lessonComments = sqliteTable("lesson_comments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  lessonId: integer("lesson_id")
+    .notNull()
+    .references(() => lessons.id),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  body: text("body").notNull(),
+  // Soft delete: set when removed; the row is retained for audit.
+  deletedAt: text("deleted_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const quizzes = sqliteTable("quizzes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   lessonId: integer("lesson_id")
